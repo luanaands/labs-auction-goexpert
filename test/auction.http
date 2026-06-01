@@ -1,0 +1,10 @@
+curl -X POST http://localhost:8080/auction \
+  -H "Content-Type: application/json" \
+  -d '{
+    "product_name": "Test Product 3",
+    "category": "Tests 3",
+    "description": "Test description 3",
+    "condition": 1
+  }'
+
+
