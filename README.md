@@ -1,10 +1,8 @@
 # Auction Go Expert
 
-Serviço de leilões em Go usando Gin e MongoDB.
+API de leilões desenvolvida em Go, com Gin e MongoDB.
 
-## Descrição
-
-Projeto simples que permite criar leilões, consultar leilões, criar lances e fechar leilões automaticamente após um tempo configurado.
+O projeto permite criar e consultar leilões, registrar lances em lote e fechar leilões automaticamente após o tempo configurado.
 
 ## Requisitos
 
@@ -12,94 +10,192 @@ Projeto simples que permite criar leilões, consultar leilões, criar lances e f
 - Docker
 - Docker Compose
 
-## Como executar os testes
+## Como executar com Docker Compose
 
-No diretório do projeto:
-
-```bash
-go test ./...
-```
-
-Isso executa todos os testes do projeto.
-
-## Como executar por Docker Compose
-
-No diretório do projeto:
+No diretório raiz do projeto, execute:
 
 ```bash
 docker-compose up --build
 ```
 
-Isso irá:
+A aplicação ficará disponível em:
 
-- subir a aplicação em `http://localhost:8080`
-- subir o MongoDB em `localhost:27017`
+```text
+http://localhost:8080
+```
 
-O arquivo de ambiente usado é `cmd/auction/.env`.
+O MongoDB ficará exposto em:
 
-## Teste manual para verificar o fechamento do leilão
+```text
+localhost:27017
+```
 
-### 1. Criar um leilão
+As variáveis de ambiente usadas pela aplicação estão em `cmd/auction/.env`.
 
-Use o endpoint `POST /auction` com JSON:
+## Variáveis principais
+
+```env
+BATCH_INSERT_INTERVAL=20s
+MAX_BATCH_SIZE=4
+AUCTION_INTERVAL=20s
+AUCTION_DURATION=3m
+MONGODB_URL=mongodb://admin:admin@mongodb:27017/auctions?authSource=admin
+MONGODB_DB=auctions
+```
+
+- `AUCTION_DURATION`: tempo até o fechamento automático de um leilão criado.
+- `BATCH_INSERT_INTERVAL`: intervalo máximo para persistir lances acumulados.
+- `MAX_BATCH_SIZE`: quantidade máxima de lances antes de gravar o lote no MongoDB.
+
+## Como executar os testes
+
+```bash
+go test ./...
+```
+
+O teste principal valida se um leilão é alterado para o status `Completed` após a duração configurada.
+
+## Endpoints
+
+### Criar leilão
+
+```http
+POST /auction
+```
+
+Exemplo:
 
 ```bash
 curl -X POST http://localhost:8080/auction \
   -H "Content-Type: application/json" \
   -d '{
-    "product_name": "Test Product",
-    "category": "Tests",
-    "description": "Test description",
-    "condition": 1
+    "product_name": "Notebook",
+    "category": "Eletronicos",
+    "description": "Notebook usado em bom estado",
+    "condition": 2
   }'
 ```
 
-### 2. Obter o ID do leilão
+No payload atual, `condition` é um valor numérico. A validação da API aceita:
 
-A resposta deve retornar o ID do leilão criado. Anote esse `auctionId`.
+- `0`
+- `1`
+- `2`
 
-### 3. Aguardar o fechamento automático
+Resposta esperada: `201 Created`.
 
-O tempo de fechamento está configurado em `cmd/auction/.env` via a variável:
+### Listar leilões
 
-```env
-AUCTION_DURATION=1m
+```http
+GET /auction?status=0
 ```
 
-Nesse exemplo, o leilão deve ser encerrado automaticamente após 1 minuto.
+Também é possível filtrar por `category` e `productName`:
 
-### 4. Consultar o leilão pelo ID
+```bash
+curl "http://localhost:8080/auction?status=0&category=Eletronicos&productName=Notebook"
+```
 
-Use o endpoint `GET /auction/{auctionId}`:
+Status:
+
+- `0`: ativo
+- `1`: completado
+
+Observação: a implementação atual exige o parâmetro `status`; usando `status=0`, a listagem retorna os leilões sem aplicar filtro de status.
+
+### Buscar leilão por ID
+
+```http
+GET /auction/{auctionId}
+```
+
+Exemplo:
 
 ```bash
 curl http://localhost:8080/auction/<auctionId>
 ```
 
-Substitua `<auctionId>` pelo ID retornado na criação.
+### Criar lance
 
-### 5. Verificar o status
+```http
+POST /bid
+```
 
-Quando o leilão estiver fechado, o campo `status` deve indicar que ele foi completado. ( statu = 1)
+Exemplo:
 
-### 6. Verificar diretamente no MongoDB (opcional)
+```bash
+curl -X POST http://localhost:8080/bid \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "<userId>",
+    "auction_id": "<auctionId>",
+    "amount": 150.50
+  }'
+```
 
-Conecte ao shell do MongoDB e use:
+Resposta esperada: `201 Created`.
+
+### Listar lances de um leilão
+
+```http
+GET /bid/{auctionId}
+```
+
+### Buscar lance vencedor
+
+```http
+GET /auction/winner/{auctionId}
+```
+
+### Buscar usuário por ID
+
+```http
+GET /user/{userId}
+```
+
+## Teste manual do fechamento automático
+
+1. Suba a aplicação:
+
+```bash
+docker-compose up --build
+```
+
+2. Crie um leilão com `POST /auction`.
+
+3. Liste os leilões e copie o campo `id` do leilão criado:
+
+```bash
+curl "http://localhost:8080/auction?status=0"
+```
+
+4. Aguarde o tempo definido em `AUCTION_DURATION`.
+
+5. Consulte o leilão pelo ID:
+
+```bash
+curl http://localhost:8080/auction/<auctionId>
+```
+
+6. Verifique o campo `status`. O valor esperado após o fechamento automático é `1`.
+
+## Verificacao no MongoDB
+
+Com o Docker Compose em execução, conecte no MongoDB:
 
 ```bash
 mongosh "mongodb://admin:admin@localhost:27017/auctions?authSource=admin"
-use auctions
-show collections
 ```
 
-Em seguida, busque o leilão criado:
+Consulte os leilões:
 
-```bash
+```javascript
+use auctions
+db.auctions.find().pretty()
+```
+
+Para buscar um leilão específico:
+
+```javascript
 db.auctions.find({ _id: "<auctionId>" }).pretty()
 ```
-
-Substitua `<auctionId>` pelo ID real do leilão.
-
-## Observações
-
-A aplicação usa a coleção `auctions` no MongoDB e o endpoint principal para criar leilões é `POST /auction`.
